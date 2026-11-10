@@ -56,22 +56,32 @@ second=$(jq -c '.vacancies[1] // empty' <<<"$BODY")
 echo "4. Free slots found: $(slot "$first") and $(slot "$second")"
 
 # 5. Book the first one.
-api POST /entries "$(jq -c --argjson type "$type_id" --argjson state "$state_id" --argjson patient "$patient_id" --argjson symptom "$symptom_id" \
+booking=$(jq -c --argjson type "$type_id" --argjson state "$state_id" --argjson patient "$patient_id" --argjson symptom "$symptom_id" \
   '{entry: ({booked_for, start_time, end_time} + {entry_type_id: $type, entry_state_id: $state, note: "Booked by the API example",
-    patient_symptoms_attributes: [{patient_id: $patient, symptom_id: $symptom}]})}' <<<"$first")"
+    patient_symptoms_attributes: [{patient_id: $patient, symptom_id: $symptom}]})}' <<<"$first")
+api POST /entries "$booking"
 entry_id=$(jq .entry.id <<<"$BODY")
 echo "5. Appointment booked: $(slot "$(jq -c .entry <<<"$BODY")")"
 
-# 6. Move it to the second one.
-api PATCH "/entries/$entry_id" "$(jq -c '{entry: {booked_for, start_time, end_time}}' <<<"$second")"
-echo "6. Appointment moved: $(slot "$(jq -c .entry <<<"$BODY")")"
+# 6. Booking the same slot again is refused with 409 and its own error name, so code can react to it.
+request POST /entries "$booking"
+(( STATUS == 409 )) || { echo 'the API booked one slot twice' >&2; exit 1; }
+echo "6. Same slot refused: HTTP $STATUS, $(jq -r '.errors[0].name' <<<"$BODY")"
 
-# 7. Errors: a patient without a last name is refused with 422 and a list of reasons.
+# 7. Move the appointment to the second slot.
+api PATCH "/entries/$entry_id" "$(jq -c '{entry: {booked_for, start_time, end_time}}' <<<"$second")"
+echo "7. Appointment moved: $(slot "$(jq -c .entry <<<"$BODY")")"
+
+# 8. Read it back: the detail carries the patient and the note.
+api GET "/entries/$entry_id"
+echo "8. Appointment read: $(jq -r '.entry | "\(.patient.last_name), note \"\(.note)\""' <<<"$BODY")"
+
+# 9. Errors: a patient without a last name is refused with 422 and a list of reasons.
 request POST /patients '{"patient":{"first_name":"Jan"}}'
 (( STATUS == 422 )) || { echo 'the API accepted an invalid patient' >&2; exit 1; }
-echo "7. Invalid patient refused: HTTP $STATUS, attribute $(jq -r '.errors[0].attribute' <<<"$BODY")"
+echo "9. Invalid patient refused: HTTP $STATUS, attribute $(jq -r '.errors[0].attribute' <<<"$BODY")"
 
-# 8. Clean up: delete the appointment, deactivate the patient.
+# 10. Clean up: delete the appointment, deactivate the patient.
 api DELETE "/entries/$entry_id"
 api DELETE "/patients/$patient_id"
-echo '8. Cleaned up'
+echo '10. Cleaned up'

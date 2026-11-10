@@ -90,19 +90,32 @@ booking["patient_symptoms_attributes"] = [["patient_id": patient["id"]!, "sympto
 var entry = try await api("POST", "/entries", ["entry": booking])["entry"] as! JSON
 print("5. Appointment booked: \(slot(entry))")
 
-// 6. Move it to the second one.
-entry = try await api("PATCH", "/entries/\(entry["id"]!)", ["entry": times(second)])["entry"] as! JSON
-print("6. Appointment moved: \(slot(entry))")
 
-// 7. Errors: a patient without a last name is refused with 422 and a list of reasons.
+// 6. Booking the same slot again is refused with 409 and its own error name, so code can react to it.
+do {
+    _ = try await api("POST", "/entries", ["entry": booking])
+    fatalError("the API booked one slot twice")
+} catch let error as ApiError {
+    print("6. Same slot refused: HTTP \(error.status), \(text(error.errors[0], "name"))")
+}
+
+// 7. Move the appointment to the second slot.
+entry = try await api("PATCH", "/entries/\(entry["id"]!)", ["entry": times(second)])["entry"] as! JSON
+print("7. Appointment moved: \(slot(entry))")
+
+// 8. Read it back: the detail carries the patient and the note.
+entry = try await api("GET", "/entries/\(entry["id"]!)")["entry"] as! JSON
+print("8. Appointment read: \(text(entry["patient"] as! JSON, "last_name")), note \"\(text(entry, "note"))\"")
+
+// 9. Errors: a patient without a last name is refused with 422 and a list of reasons.
 do {
     _ = try await api("POST", "/patients", ["patient": ["first_name": "Jan"]])
     fatalError("the API accepted an invalid patient")
 } catch let error as ApiError {
-    print("7. Invalid patient refused: HTTP \(error.status), attribute \(text(error.errors[0], "attribute"))")
+    print("9. Invalid patient refused: HTTP \(error.status), attribute \(text(error.errors[0], "attribute"))")
 }
 
-// 8. Clean up: delete the appointment, deactivate the patient.
+// 10. Clean up: delete the appointment, deactivate the patient.
 _ = try await api("DELETE", "/entries/\(entry["id"]!)")
 _ = try await api("DELETE", "/patients/\(patient["id"]!)")
-print("8. Cleaned up")
+print("10. Cleaned up")

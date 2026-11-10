@@ -111,31 +111,44 @@ public class Booking {
         JsonArray patientSymptoms = new JsonArray();
         patientSymptoms.add(patientSymptom);
 
-        JsonObject booking = times(first);
-        booking.add("entry_type_id", type.get("id"));
-        booking.add("entry_state_id", state.get("id"));
-        booking.addProperty("note", "Booked by the API example");
-        booking.add("patient_symptoms_attributes", patientSymptoms);
-        JsonObject entry = api("POST", "/entries", wrap("entry", booking)).getAsJsonObject("entry");
+        JsonObject entryAttributes = times(first);
+        entryAttributes.add("entry_type_id", type.get("id"));
+        entryAttributes.add("entry_state_id", state.get("id"));
+        entryAttributes.addProperty("note", "Booked by the API example");
+        entryAttributes.add("patient_symptoms_attributes", patientSymptoms);
+        JsonObject booking = wrap("entry", entryAttributes);
+        JsonObject entry = api("POST", "/entries", booking).getAsJsonObject("entry");
         System.out.println("5. Appointment booked: " + slot(entry));
 
-        // 6. Move it to the second one.
-        entry = api("PATCH", "/entries/" + entry.get("id").getAsInt(), wrap("entry", times(second))).getAsJsonObject("entry");
-        System.out.println("6. Appointment moved: " + slot(entry));
+        // 6. Booking the same slot again is refused with 409 and its own error name, so code can react to it.
+        try {
+            api("POST", "/entries", booking);
+            throw new IllegalStateException("the API booked one slot twice");
+        } catch (ApiError error) {
+            System.out.println("6. Same slot refused: HTTP " + error.status + ", " + text(error.errors.get(0).getAsJsonObject(), "name"));
+        }
 
-        // 7. Errors: a patient without a last name is refused with 422 and a list of reasons.
+        // 7. Move the appointment to the second slot.
+        entry = api("PATCH", "/entries/" + entry.get("id").getAsInt(), wrap("entry", times(second))).getAsJsonObject("entry");
+        System.out.println("7. Appointment moved: " + slot(entry));
+
+        // 8. Read it back: the detail carries the patient and the note.
+        entry = api("GET", "/entries/" + entry.get("id").getAsInt(), null).getAsJsonObject("entry");
+        System.out.println("8. Appointment read: " + text(entry.getAsJsonObject("patient"), "last_name") + ", note \"" + text(entry, "note") + "\"");
+
+        // 9. Errors: a patient without a last name is refused with 422 and a list of reasons.
         JsonObject invalid = new JsonObject();
         invalid.addProperty("first_name", "Jan");
         try {
             api("POST", "/patients", wrap("patient", invalid));
             throw new IllegalStateException("the API accepted an invalid patient");
         } catch (ApiError error) {
-            System.out.println("7. Invalid patient refused: HTTP " + error.status + ", attribute " + text(error.errors.get(0).getAsJsonObject(), "attribute"));
+            System.out.println("9. Invalid patient refused: HTTP " + error.status + ", attribute " + text(error.errors.get(0).getAsJsonObject(), "attribute"));
         }
 
-        // 8. Clean up: delete the appointment, deactivate the patient.
+        // 10. Clean up: delete the appointment, deactivate the patient.
         api("DELETE", "/entries/" + entry.get("id").getAsInt(), null);
         api("DELETE", "/patients/" + patient.get("id").getAsInt(), null);
-        System.out.println("8. Cleaned up");
+        System.out.println("10. Cleaned up");
     }
 }

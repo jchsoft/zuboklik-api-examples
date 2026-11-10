@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Zuboklik API example: create a patient, book a preventive check-up, move it, clean up.
+# Zuboklik API example: create a patient, find a free slot, book a preventive check-up, move it, clean up.
 # Runs on plain Ruby 3.x, no gems.  Usage:  ZUBOKLIK_API_KEY=... ruby booking.rb
 
 require 'date'
@@ -71,27 +71,40 @@ raise 'the practice has fewer than two free slots in the next 30 days' unless se
 puts "4. Free slots found: #{slot(first)} and #{slot(second)}"
 
 # 5. Book the first one.
-entry = api(:post, '/entries', { entry: {
+booking = { entry: {
   entry_type_id: type['id'], entry_state_id: state['id'],
   **first.slice('booked_for', 'start_time', 'end_time'),
   note: 'Booked by the API example',
   patient_symptoms_attributes: [{ patient_id: patient['id'], symptom_id: symptom['id'] }]
-} }).fetch('entry')
+} }
+entry = api(:post, '/entries', booking).fetch('entry')
 puts "5. Appointment booked: #{slot(entry)}"
 
-# 6. Move it to the second one.
-entry = api(:patch, "/entries/#{entry['id']}", { entry: second.slice('booked_for', 'start_time', 'end_time') }).fetch('entry')
-puts "6. Appointment moved: #{slot(entry)}"
+# 6. Booking the same slot again is refused with 409 and its own error name, so code can react to it.
+begin
+  api(:post, '/entries', booking)
+  raise 'the API booked one slot twice'
+rescue ApiError => e
+  puts "6. Same slot refused: HTTP #{e.status}, #{e.errors.first['name']}"
+end
 
-# 7. Errors: a patient without a last name is refused with 422 and a list of reasons.
+# 7. Move the appointment to the second slot.
+entry = api(:patch, "/entries/#{entry['id']}", { entry: second.slice('booked_for', 'start_time', 'end_time') }).fetch('entry')
+puts "7. Appointment moved: #{slot(entry)}"
+
+# 8. Read it back: the detail carries the patient and the note.
+entry = api(:get, "/entries/#{entry['id']}").fetch('entry')
+puts "8. Appointment read: #{entry['patient']['last_name']}, note \"#{entry['note']}\""
+
+# 9. Errors: a patient without a last name is refused with 422 and a list of reasons.
 begin
   api(:post, '/patients', { patient: { first_name: 'Jan' } })
   raise 'the API accepted an invalid patient'
 rescue ApiError => e
-  puts "7. Invalid patient refused: HTTP #{e.status}, attribute #{e.errors.first['attribute']}"
+  puts "9. Invalid patient refused: HTTP #{e.status}, attribute #{e.errors.first['attribute']}"
 end
 
-# 8. Clean up: delete the appointment, deactivate the patient.
+# 10. Clean up: delete the appointment, deactivate the patient.
 api(:delete, "/entries/#{entry['id']}")
 api(:delete, "/patients/#{patient['id']}")
-puts '8. Cleaned up'
+puts '10. Cleaned up'

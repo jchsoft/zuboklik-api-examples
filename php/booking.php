@@ -90,27 +90,40 @@ if (count($vacancies) < 2) {
 echo '4. Free slots found: ', slot($first), ' and ', slot($second), "\n";
 
 // 5. Book the first one.
-$entry = api('POST', '/entries', ['entry' => [
+$booking = ['entry' => [
     'entry_type_id' => $type['id'], 'entry_state_id' => $state['id'],
     ...times($first),
     'note' => 'Booked by the API example',
     'patient_symptoms_attributes' => [['patient_id' => $patient['id'], 'symptom_id' => $symptom['id']]],
-]])['entry'];
+]];
+$entry = api('POST', '/entries', $booking)['entry'];
 echo '5. Appointment booked: ', slot($entry), "\n";
 
-// 6. Move it to the second one.
-$entry = api('PATCH', "/entries/{$entry['id']}", ['entry' => times($second)])['entry'];
-echo '6. Appointment moved: ', slot($entry), "\n";
+// 6. Booking the same slot again is refused with 409 and its own error name, so code can react to it.
+try {
+    api('POST', '/entries', $booking);
+    exit("the API booked one slot twice\n");
+} catch (ApiError $error) {
+    echo "6. Same slot refused: HTTP {$error->status}, {$error->errors[0]['name']}\n";
+}
 
-// 7. Errors: a patient without a last name is refused with 422 and a list of reasons.
+// 7. Move the appointment to the second slot.
+$entry = api('PATCH', "/entries/{$entry['id']}", ['entry' => times($second)])['entry'];
+echo '7. Appointment moved: ', slot($entry), "\n";
+
+// 8. Read it back: the detail carries the patient and the note.
+$entry = api('GET', "/entries/{$entry['id']}")['entry'];
+echo "8. Appointment read: {$entry['patient']['last_name']}, note \"{$entry['note']}\"\n";
+
+// 9. Errors: a patient without a last name is refused with 422 and a list of reasons.
 try {
     api('POST', '/patients', ['patient' => ['first_name' => 'Jan']]);
     exit("the API accepted an invalid patient\n");
 } catch (ApiError $error) {
-    echo "7. Invalid patient refused: HTTP {$error->status}, attribute {$error->errors[0]['attribute']}\n";
+    echo "9. Invalid patient refused: HTTP {$error->status}, attribute {$error->errors[0]['attribute']}\n";
 }
 
-// 8. Clean up: delete the appointment, deactivate the patient.
+// 10. Clean up: delete the appointment, deactivate the patient.
 api('DELETE', "/entries/{$entry['id']}");
 api('DELETE', "/patients/{$patient['id']}");
-echo "8. Cleaned up\n";
+echo "10. Cleaned up\n";

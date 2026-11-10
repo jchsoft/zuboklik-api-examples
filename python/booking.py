@@ -71,26 +71,38 @@ print(f"4. Free slots found: {slot(first)} and {slot(second)}")
 
 # 5. Book the first one.
 times = ("booked_for", "start_time", "end_time")
-entry = api("POST", "/entries", {"entry": {
+booking = {"entry": {
     "entry_type_id": entry_type["id"], "entry_state_id": state["id"],
     **{key: first[key] for key in times},
     "note": "Booked by the API example",
     "patient_symptoms_attributes": [{"patient_id": patient["id"], "symptom_id": symptom["id"]}],
-}})["entry"]
+}}
+entry = api("POST", "/entries", booking)["entry"]
 print(f"5. Appointment booked: {slot(entry)}")
 
-# 6. Move it to the second one.
-entry = api("PATCH", f"/entries/{entry['id']}", {"entry": {key: second[key] for key in times}})["entry"]
-print(f"6. Appointment moved: {slot(entry)}")
+# 6. Booking the same slot again is refused with 409 and its own error name, so code can react to it.
+try:
+    api("POST", "/entries", booking)
+    raise SystemExit("the API booked one slot twice")
+except ApiError as error:
+    print(f"6. Same slot refused: HTTP {error.status}, {error.errors[0]['name']}")
 
-# 7. Errors: a patient without a last name is refused with 422 and a list of reasons.
+# 7. Move the appointment to the second slot.
+entry = api("PATCH", f"/entries/{entry['id']}", {"entry": {key: second[key] for key in times}})["entry"]
+print(f"7. Appointment moved: {slot(entry)}")
+
+# 8. Read it back: the detail carries the patient and the note.
+entry = api("GET", f"/entries/{entry['id']}")["entry"]
+print(f"8. Appointment read: {entry['patient']['last_name']}, note \"{entry['note']}\"")
+
+# 9. Errors: a patient without a last name is refused with 422 and a list of reasons.
 try:
     api("POST", "/patients", {"patient": {"first_name": "Jan"}})
     raise SystemExit("the API accepted an invalid patient")
 except ApiError as error:
-    print(f"7. Invalid patient refused: HTTP {error.status}, attribute {error.errors[0]['attribute']}")
+    print(f"9. Invalid patient refused: HTTP {error.status}, attribute {error.errors[0]['attribute']}")
 
-# 8. Clean up: delete the appointment, deactivate the patient.
+# 10. Clean up: delete the appointment, deactivate the patient.
 api("DELETE", f"/entries/{entry['id']}")
 api("DELETE", f"/patients/{patient['id']}")
-print("8. Cleaned up")
+print("10. Cleaned up")

@@ -155,21 +155,31 @@ func main() {
 	entry := must("POST", "/entries", object{"entry": booking})["entry"].(object)
 	fmt.Printf("5. Appointment booked: %s\n", slot(entry))
 
-	// 6. Move it to the second one.
-	entry = must("PATCH", fmt.Sprintf("/entries/%d", id(entry)), object{"entry": times(second)})["entry"].(object)
-	fmt.Printf("6. Appointment moved: %s\n", slot(entry))
-
-	// 7. Errors: a patient without a last name is refused with 422 and a list of reasons.
-	_, err := api("POST", "/patients", object{"patient": object{"first_name": "Jan"}})
+	// 6. Booking the same slot again is refused with 409 and its own error name, so code can react to it.
 	var apiError *APIError
-	if !errors.As(err, &apiError) {
+	if _, err := api("POST", "/entries", object{"entry": booking}); !errors.As(err, &apiError) {
+		fmt.Fprintln(os.Stderr, "the API booked one slot twice")
+		os.Exit(1)
+	}
+	fmt.Printf("6. Same slot refused: HTTP %d, %s\n", apiError.Status, apiError.Errors[0]["name"])
+
+	// 7. Move the appointment to the second slot.
+	entry = must("PATCH", fmt.Sprintf("/entries/%d", id(entry)), object{"entry": times(second)})["entry"].(object)
+	fmt.Printf("7. Appointment moved: %s\n", slot(entry))
+
+	// 8. Read it back: the detail carries the patient and the note.
+	entry = must("GET", fmt.Sprintf("/entries/%d", id(entry)), nil)["entry"].(object)
+	fmt.Printf("8. Appointment read: %s, note \"%s\"\n", entry["patient"].(object)["last_name"], entry["note"])
+
+	// 9. Errors: a patient without a last name is refused with 422 and a list of reasons.
+	if _, err := api("POST", "/patients", object{"patient": object{"first_name": "Jan"}}); !errors.As(err, &apiError) {
 		fmt.Fprintln(os.Stderr, "the API accepted an invalid patient")
 		os.Exit(1)
 	}
-	fmt.Printf("7. Invalid patient refused: HTTP %d, attribute %s\n", apiError.Status, apiError.Errors[0]["attribute"])
+	fmt.Printf("9. Invalid patient refused: HTTP %d, attribute %s\n", apiError.Status, apiError.Errors[0]["attribute"])
 
-	// 8. Clean up: delete the appointment, deactivate the patient.
+	// 10. Clean up: delete the appointment, deactivate the patient.
 	must("DELETE", fmt.Sprintf("/entries/%d", id(entry)), nil)
 	must("DELETE", fmt.Sprintf("/patients/%d", id(patient)), nil)
-	fmt.Println("8. Cleaned up")
+	fmt.Println("10. Cleaned up")
 }

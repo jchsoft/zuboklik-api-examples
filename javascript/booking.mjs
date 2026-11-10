@@ -67,7 +67,7 @@ const [first, second] = vacancies;
 console.log(`4. Free slots found: ${slot(first)} and ${slot(second)}`);
 
 // 5. Book the first one.
-let { entry } = await api('POST', '/entries', {
+const booking = {
   entry: {
     entry_type_id: type.id,
     entry_state_id: state.id,
@@ -75,23 +75,37 @@ let { entry } = await api('POST', '/entries', {
     note: 'Booked by the API example',
     patient_symptoms_attributes: [{ patient_id: patient.id, symptom_id: symptom.id }],
   },
-});
+};
+let { entry } = await api('POST', '/entries', booking);
 console.log(`5. Appointment booked: ${slot(entry)}`);
 
-// 6. Move it to the second one.
-({ entry } = await api('PATCH', `/entries/${entry.id}`, { entry: times(second) }));
-console.log(`6. Appointment moved: ${slot(entry)}`);
+// 6. Booking the same slot again is refused with 409 and its own error name, so code can react to it.
+try {
+  await api('POST', '/entries', booking);
+  throw new Error('the API booked one slot twice');
+} catch (error) {
+  if (!(error instanceof ApiError)) throw error;
+  console.log(`6. Same slot refused: HTTP ${error.status}, ${error.errors[0].name}`);
+}
 
-// 7. Errors: a patient without a last name is refused with 422 and a list of reasons.
+// 7. Move the appointment to the second slot.
+({ entry } = await api('PATCH', `/entries/${entry.id}`, { entry: times(second) }));
+console.log(`7. Appointment moved: ${slot(entry)}`);
+
+// 8. Read it back: the detail carries the patient and the note.
+({ entry } = await api('GET', `/entries/${entry.id}`));
+console.log(`8. Appointment read: ${entry.patient.last_name}, note "${entry.note}"`);
+
+// 9. Errors: a patient without a last name is refused with 422 and a list of reasons.
 try {
   await api('POST', '/patients', { patient: { first_name: 'Jan' } });
   throw new Error('the API accepted an invalid patient');
 } catch (error) {
   if (!(error instanceof ApiError)) throw error;
-  console.log(`7. Invalid patient refused: HTTP ${error.status}, attribute ${error.errors[0].attribute}`);
+  console.log(`9. Invalid patient refused: HTTP ${error.status}, attribute ${error.errors[0].attribute}`);
 }
 
-// 8. Clean up: delete the appointment, deactivate the patient.
+// 10. Clean up: delete the appointment, deactivate the patient.
 await api('DELETE', `/entries/${entry.id}`);
 await api('DELETE', `/patients/${patient.id}`);
-console.log('8. Cleaned up');
+console.log('10. Cleaned up');

@@ -1,45 +1,44 @@
 #!/usr/bin/env bash
 # Runs one example in every language and checks that they all print the same thing.
 #
-#   bin/run-all webhook            offline, no key needed
-#   bin/run-all booking            needs ZUBOKLIK_API_KEY (and optionally ZUBOKLIK_API_URL)
-#   bin/run-all booking ruby go    only the listed languages
+#   bin/run-all verify_webhook        offline, no key needed
+#   bin/run-all booking               needs ZUBOKLIK_API_KEY (and optionally ZUBOKLIK_API_URL)
+#   bin/run-all patients
+#   bin/run-all webhooks
+#   bin/run-all booking ruby go       only the listed languages
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-example=${1:?usage: bin/run-all webhook|booking [language...]}
+example=${1:?usage: bin/run-all verify_webhook|booking|patients|webhooks [language...]}
 shift
+case $example in
+  verify_webhook|booking|patients|webhooks) ;;
+  *) echo "unknown example: $example" >&2; exit 2 ;;
+esac
 languages=("$@")
 (( ${#languages[@]} )) || languages=(curl ruby php python javascript csharp java kotlin go swift rust cpp)
 
+# booking -> Booking, verify_webhook -> VerifyWebhook
+pascal=$(awk -F_ '{ for (i = 1; i <= NF; i++) printf "%s%s", toupper(substr($i, 1, 1)), substr($i, 2) }' <<<"$example")
+
 command_for() {
-  case "$example:$1" in
-    booking:curl)       echo './booking.sh' ;;
-    webhook:curl)       echo '' ;; # curl sends requests; there is nothing to verify with it
-    booking:ruby)       echo 'ruby booking.rb' ;;
-    webhook:ruby)       echo 'ruby verify_webhook.rb' ;;
-    booking:php)        echo 'php booking.php' ;;
-    webhook:php)        echo 'php verify_webhook.php' ;;
-    booking:python)     echo 'python3 booking.py' ;;
-    webhook:python)     echo 'python3 verify_webhook.py' ;;
-    booking:javascript) echo 'node booking.mjs' ;;
-    webhook:javascript) echo 'node verify_webhook.mjs' ;;
-    booking:csharp)     echo 'dotnet run Booking.cs' ;;
-    webhook:csharp)     echo 'dotnet run VerifyWebhook.cs' ;;
-    booking:java)       echo 'mvn -q compile exec:java -Dexec.mainClass=Booking' ;;
-    webhook:java)       echo 'mvn -q compile exec:java -Dexec.mainClass=VerifyWebhook' ;;
-    booking:kotlin)     echo 'kotlin booking.main.kts' ;;
-    webhook:kotlin)     echo 'kotlin verify_webhook.main.kts' ;;
-    booking:go)         echo 'go run ./booking' ;;
-    webhook:go)         echo 'go run ./verify_webhook' ;;
-    booking:swift)      echo 'swift booking.swift' ;;
-    webhook:swift)      echo 'swift verify_webhook.swift' ;;
-    booking:rust)       echo 'cargo run --quiet --bin booking' ;;
-    webhook:rust)       echo 'cargo run --quiet --bin verify_webhook' ;;
-    booking:cpp)        echo "cmake -B build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build >/dev/null && ./build/booking" ;;
-    webhook:cpp)        echo "cmake -B build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build >/dev/null && ./build/verify_webhook" ;;
-    *) echo "unknown example or language: $example $1" >&2; exit 2 ;;
+  case $1 in
+    curl)
+      # curl sends requests; there is no signature to verify with it
+      [[ $example == verify_webhook ]] || echo "./$example.sh" ;;
+    ruby)       echo "ruby $example.rb" ;;
+    php)        echo "php $example.php" ;;
+    python)     echo "python3 $example.py" ;;
+    javascript) echo "node $example.mjs" ;;
+    csharp)     echo "dotnet run $pascal.cs" ;;
+    java)       echo "mvn -q compile exec:java -Dexec.mainClass=$pascal" ;;
+    kotlin)     echo "kotlin $example.main.kts" ;;
+    go)         echo "go run ./$example" ;;
+    swift)      echo "swift $example.swift" ;;
+    rust)       echo "cargo run --quiet --bin $example" ;;
+    cpp)        echo "cmake -B build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build >/dev/null && ./build/$example" ;;
+    *) echo "unknown language: $1" >&2; return 2 ;;
   esac
 }
 
@@ -49,7 +48,8 @@ for language in "${languages[@]}"; do
   command=$(command_for "$language") || exit 2
   [[ -n $command ]] || continue
 
-  if output=$(cd "$language" && eval "$command" 2>"/tmp/run-all-$language.err"); then
+  errors=$(mktemp)
+  if output=$(cd "$language" && eval "$command" 2>"$errors"); then
     if [[ -z $expected ]]; then
       expected=$output
       printf '%s\n\n' "$output"
@@ -61,8 +61,9 @@ for language in "${languages[@]}"; do
       failed=1
     fi
   else
-    echo "FAIL  $language"; { echo "$output"; cat "/tmp/run-all-$language.err"; } | tail -15 | sed 's/^/      /'
+    echo "FAIL  $language"; { echo "$output"; cat "$errors"; } | tail -15 | sed 's/^/      /'
     failed=1
   fi
+  rm -f "$errors"
 done
 exit $failed

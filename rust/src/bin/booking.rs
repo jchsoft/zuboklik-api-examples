@@ -82,7 +82,7 @@ fn main() -> Result<(), ApiError> {
     } })))?["patient"].clone();
     println!("3. Patient created: {} {}", text(&patient, "first_name"), text(&patient, "last_name"));
 
-    // 4. Ask for free 30-minute slots in the week starting 30 days from tomorrow (UTC date; close enough for a search window).
+    // 4. Ask for free 30-minute slots in the next 30 days (UTC date; close enough for a search window).
     let from = OffsetDateTime::now_utc().date() + Duration::days(1);
     let query = format!("/vacancies?from={}&to={}&duration=30", from, from + Duration::days(30));
     let vacancies = api.call("GET", &query, None)?["vacancies"].as_array().cloned().unwrap_or_default();
@@ -90,29 +90,40 @@ fn main() -> Result<(), ApiError> {
     println!("4. Free slots found: {} and {}", slot(first), slot(second));
 
     // 5. Book the first one.
-    let mut entry = api.call("POST", "/entries", Some(json!({ "entry": {
+    let booking = json!({ "entry": {
         "entry_type_id": entry_type["id"], "entry_state_id": state["id"],
         "booked_for": first["booked_for"], "start_time": first["start_time"], "end_time": first["end_time"],
         "note": "Booked by the API example",
         "patient_symptoms_attributes": [{ "patient_id": patient["id"], "symptom_id": symptom["id"] }]
-    } })))?["entry"].clone();
+    } });
+    let mut entry = api.call("POST", "/entries", Some(booking.clone()))?["entry"].clone();
     println!("5. Appointment booked: {}", slot(&entry));
 
-    // 6. Move it to the second one.
+    // 6. Booking the same slot again is refused with 409 and its own error name, so code can react to it.
+    match api.call("POST", "/entries", Some(booking)) {
+        Ok(_) => panic!("the API booked one slot twice"),
+        Err(error) => println!("6. Same slot refused: HTTP {}, {}", error.status, text(&error.errors[0], "name")),
+    }
+
+    // 7. Move the appointment to the second slot.
     entry = api.call("PATCH", &format!("/entries/{}", entry["id"]), Some(json!({ "entry": {
         "booked_for": second["booked_for"], "start_time": second["start_time"], "end_time": second["end_time"]
     } })))?["entry"].clone();
-    println!("6. Appointment moved: {}", slot(&entry));
+    println!("7. Appointment moved: {}", slot(&entry));
 
-    // 7. Errors: a patient without a last name is refused with 422 and a list of reasons.
+    // 8. Read it back: the detail carries the patient and the note.
+    entry = api.call("GET", &format!("/entries/{}", entry["id"]), None)?["entry"].clone();
+    println!("8. Appointment read: {}, note \"{}\"", text(&entry["patient"], "last_name"), text(&entry, "note"));
+
+    // 9. Errors: a patient without a last name is refused with 422 and a list of reasons.
     match api.call("POST", "/patients", Some(json!({ "patient": { "first_name": "Jan" } }))) {
         Ok(_) => panic!("the API accepted an invalid patient"),
-        Err(error) => println!("7. Invalid patient refused: HTTP {}, attribute {}", error.status, text(&error.errors[0], "attribute")),
+        Err(error) => println!("9. Invalid patient refused: HTTP {}, attribute {}", error.status, text(&error.errors[0], "attribute")),
     }
 
-    // 8. Clean up: delete the appointment, deactivate the patient.
+    // 10. Clean up: delete the appointment, deactivate the patient.
     api.call("DELETE", &format!("/entries/{}", entry["id"]), None)?;
     api.call("DELETE", &format!("/patients/{}", patient["id"]), None)?;
-    println!("8. Cleaned up");
+    println!("10. Cleaned up");
     Ok(())
 }

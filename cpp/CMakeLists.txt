@@ -11,5 +11,11 @@ find_package(nlohmann_json REQUIRED)
 add_executable(booking booking.cpp)
 target_link_libraries(booking PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
 
+add_executable(patients patients.cpp)
+target_link_libraries(patients PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
+
+add_executable(webhooks webhooks.cpp)
+target_link_libraries(webhooks PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
+
 add_executable(verify_webhook verify_webhook.cpp)
 target_link_libraries(verify_webhook PRIVATE OpenSSL::Crypto nlohmann_json::nlohmann_json)

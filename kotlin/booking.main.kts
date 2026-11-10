@@ -70,27 +70,40 @@ val second = vacancies[1].asJsonObject
 println("4. Free slots found: ${slot(first)} and ${slot(second)}")
 
 // 5. Book the first one.
-var entry = api("POST", "/entries", mapOf("entry" to times(first) + mapOf(
+val booking = mapOf("entry" to times(first) + mapOf(
     "entry_type_id" to type["id"].asInt,
     "entry_state_id" to state["id"].asInt,
     "note" to "Booked by the API example",
     "patient_symptoms_attributes" to listOf(mapOf("patient_id" to patient["id"].asInt, "symptom_id" to symptom["id"].asInt)),
-)))!!.getAsJsonObject("entry")
+))
+var entry = api("POST", "/entries", booking)!!.getAsJsonObject("entry")
 println("5. Appointment booked: ${slot(entry)}")
 
-// 6. Move it to the second one.
-entry = api("PATCH", "/entries/${entry["id"].asInt}", mapOf("entry" to times(second)))!!.getAsJsonObject("entry")
-println("6. Appointment moved: ${slot(entry)}")
+// 6. Booking the same slot again is refused with 409 and its own error name, so code can react to it.
+try {
+    api("POST", "/entries", booking)
+    error("the API booked one slot twice")
+} catch (e: ApiError) {
+    println("6. Same slot refused: HTTP ${e.status}, ${e.errors[0].asJsonObject["name"].asString}")
+}
 
-// 7. Errors: a patient without a last name is refused with 422 and a list of reasons.
+// 7. Move the appointment to the second slot.
+entry = api("PATCH", "/entries/${entry["id"].asInt}", mapOf("entry" to times(second)))!!.getAsJsonObject("entry")
+println("7. Appointment moved: ${slot(entry)}")
+
+// 8. Read it back: the detail carries the patient and the note.
+entry = api("GET", "/entries/${entry["id"].asInt}")!!.getAsJsonObject("entry")
+println("8. Appointment read: ${entry.getAsJsonObject("patient")["last_name"].asString}, note \"${entry["note"].asString}\"")
+
+// 9. Errors: a patient without a last name is refused with 422 and a list of reasons.
 try {
     api("POST", "/patients", mapOf("patient" to mapOf("first_name" to "Jan")))
     error("the API accepted an invalid patient")
 } catch (e: ApiError) {
-    println("7. Invalid patient refused: HTTP ${e.status}, attribute ${e.errors[0].asJsonObject["attribute"].asString}")
+    println("9. Invalid patient refused: HTTP ${e.status}, attribute ${e.errors[0].asJsonObject["attribute"].asString}")
 }
 
-// 8. Clean up: delete the appointment, deactivate the patient.
+// 10. Clean up: delete the appointment, deactivate the patient.
 api("DELETE", "/entries/${entry["id"].asInt}")
 api("DELETE", "/patients/${patient["id"].asInt}")
-println("8. Cleaned up")
+println("10. Cleaned up")

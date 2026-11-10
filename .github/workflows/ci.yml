@@ -31,20 +31,20 @@ jobs:
           java-version: '21'
       - name: C++ libraries
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev nlohmann-json3-dev
-      - run: bin/run-all webhook $LANGUAGES
+      - run: bin/run-all verify_webhook $LANGUAGES
 
   webhook-swift:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: bin/run-all webhook swift
+      - run: bin/run-all verify_webhook swift
 
-  # Live: the booking scenario against a test practice. One language after another, because they
-  # all book the same first free slot. Skipped when the repository has no key.
-  booking:
+  # Live: the examples that call the API, against a test practice. One language after another,
+  # because they all book the same first free slot. Skipped when the repository has no key.
+  live:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    concurrency: booking # never two runs against the same practice at once
+    concurrency: live # never two runs against the same practice at once
     env:
       ZUBOKLIK_API_KEY: ${{ secrets.ZUBOKLIK_API_KEY }}
       ZUBOKLIK_API_URL: ${{ vars.ZUBOKLIK_API_URL }}
@@ -65,8 +65,18 @@ jobs:
       - name: C++ libraries
         if: steps.key.outputs.present == 'true'
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev nlohmann-json3-dev
-      - name: Booking scenario in every language
+      - name: Booking in every language
         if: steps.key.outputs.present == 'true'
         run: |
           [ -n "$ZUBOKLIK_API_URL" ] || unset ZUBOKLIK_API_URL
           bin/run-all booking $LANGUAGES
+      - name: Patients in every language
+        if: steps.key.outputs.present == 'true' && !cancelled()
+        run: |
+          [ -n "$ZUBOKLIK_API_URL" ] || unset ZUBOKLIK_API_URL
+          bin/run-all patients $LANGUAGES
+      - name: Webhooks in every language
+        if: steps.key.outputs.present == 'true' && !cancelled()
+        run: |
+          [ -n "$ZUBOKLIK_API_URL" ] || unset ZUBOKLIK_API_URL
+          bin/run-all webhooks $LANGUAGES
