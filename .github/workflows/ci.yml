@@ -1,0 +1,72 @@
+name: Examples
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1' # Mondays 05:17 UTC: catch an API change that broke an example
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+  LANGUAGES: curl ruby php python javascript csharp java kotlin go rust cpp
+
+jobs:
+  # Offline: every language verifies the same webhook test vector.
+  webhook:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: C++ libraries
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev nlohmann-json3-dev
+      - run: bin/run-all webhook $LANGUAGES
+
+  webhook-swift:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bin/run-all webhook swift
+
+  # Live: the booking scenario against a test practice. One language after another, because they
+  # all book the same first free slot. Skipped when the repository has no key.
+  booking:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency: booking # never two runs against the same practice at once
+    env:
+      ZUBOKLIK_API_KEY: ${{ secrets.ZUBOKLIK_API_KEY }}
+      ZUBOKLIK_API_URL: ${{ vars.ZUBOKLIK_API_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is there a key?
+        id: key
+        run: echo "present=${{ secrets.ZUBOKLIK_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-dotnet@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-java@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: C++ libraries
+        if: steps.key.outputs.present == 'true'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev nlohmann-json3-dev
+      - name: Booking scenario in every language
+        if: steps.key.outputs.present == 'true'
+        run: |
+          [ -n "$ZUBOKLIK_API_URL" ] || unset ZUBOKLIK_API_URL
+          bin/run-all booking $LANGUAGES

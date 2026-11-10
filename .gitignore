@@ -1,0 +1,10 @@
+.env
+.DS_Store
+
+# build output
+cpp/build/
+rust/target/
+java/target/
+csharp/bin/
+csharp/obj/
+python/__pycache__/

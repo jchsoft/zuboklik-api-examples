@@ -1,0 +1,6 @@
+{
+  "secret": "whsec_test_0123456789abcdef",
+  "timestamp": "1752670800",
+  "body": "{\"event\":\"patient_created\",\"action\":\"create\",\"resource_type\":\"Patient\",\"resource_id\":4711,\"office_code\":\"ABC123\",\"occurred_at\":\"2026-07-16T14:00:00.000+02:00\"}",
+  "signature": "sha256=81161f8916f3d70f38cffce0f8755d42d4a166b73428fd060419349551918b06"
+}
