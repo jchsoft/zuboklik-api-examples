@@ -1,0 +1,89 @@
+// Zuboklik API example: keep your own system in step with a practice - pair a record with your own id,
+// survive a repeated request, and read "what changed since last time" (deletions included).
+// Runs on plain Node.js 18+, no packages.  Usage:  ZUBOKLIK_API_KEY=... node sync.mjs
+
+const API_URL = process.env.ZUBOKLIK_API_URL ?? 'https://zuboklik.cz/api/v1';
+const API_KEY = process.env.ZUBOKLIK_API_KEY;
+if (!API_KEY) throw new Error('set ZUBOKLIK_API_KEY');
+// Where to start reading changes. A real integration stores the cursor of the last change it processed
+// and never needs this; the example starts "now" unless told otherwise.
+const SINCE = process.env.ZUBOKLIK_SYNC_SINCE ?? new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+const EXTERNAL_ID = 'example-patient-1'; // the id of this patient in YOUR system
+
+// Thrown for every non-2xx answer. `errors` is the parsed "errors" array, `body` the whole parsed response.
+class ApiError extends Error {
+  constructor(status, body) {
+    const errors = body?.errors ?? [];
+    super(`HTTP ${status}: ${JSON.stringify(errors)}`);
+    this.status = status;
+    this.body = body ?? {};
+    this.errors = errors;
+  }
+}
+
+// One request. Returns the parsed JSON body (null for 204 No Content).
+async function api(method, path, body) {
+  const response = await fetch(API_URL + path, {
+    method,
+    headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  const parsed = text ? JSON.parse(text) : null;
+  if (!response.ok) throw new ApiError(response.status, parsed);
+  return parsed;
+}
+
+// What your system does with one change. A webhook delivery has the same fields, so the same code handles both.
+// Returns a line describing what was done.
+async function apply(change) {
+  const collection = change.resource_type === 'Patient' ? 'patients' : 'entries';
+  if (change.action === 'destroy') return `${change.event}: removed from our system`;
+  try {
+    await api('GET', `/${collection}/${change.resource_id}`); // the current state of the record; save it on your side
+    return `${change.event}: saved to our system`;
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) throw error;
+    return `${change.event}: already gone, removed from our system`; // deleted again before we asked
+  }
+}
+
+const newPatient = { patient: { first_name: 'Eva', last_name: 'Ukázková', phone_number: '+420777111222', external_id: EXTERNAL_ID } };
+
+// 1. Pairing: is this patient of ours already in the practice? Ask by our own id; create only when not found.
+//    (For the very first pairing of existing patients ask by birth number: GET /patients?pin=...)
+let found = (await api('GET', `/patients?external_id=${EXTERNAL_ID}`)).patients;
+const patient = found[0] ?? (await api('POST', '/patients', newPatient)).patient;
+console.log(`1. Patient paired: ${patient.first_name} ${patient.last_name}, external_id ${patient.external_id}`);
+
+// 2. A repeated request (say, after a timeout) creates nothing: 409 and the existing record comes back.
+try {
+  await api('POST', '/patients', newPatient);
+  throw new Error('the API created the same patient twice');
+} catch (error) {
+  if (!(error instanceof ApiError)) throw error;
+  const same = error.body.patient?.id === patient.id;
+  console.log(`2. Repeated request created nothing: HTTP ${error.status}, ${error.errors[0].name}, same patient: ${same}`);
+}
+
+// 3. From now on find the record by your own id.
+found = (await api('GET', `/patients?external_id=${EXTERNAL_ID}`)).patients;
+console.log(`3. Found by external_id: ${found.length} patient(s)`);
+
+// 4. What changed in the practice since last time? Page by cursor until `more` is false.
+//    Changes made by this key are left out; you see what the staff, the patients and other systems did.
+const applied = [];
+let query = `since=${encodeURIComponent(SINCE)}`;
+for (;;) {
+  const page = await api('GET', `/changes?${query}`);
+  for (const change of page.changes) applied.push(await apply(change));
+  if (!page.meta.more) break;
+  query = `after=${page.meta.next_cursor}`; // store this cursor; next time start from it
+}
+console.log(`4. Changes from the practice: ${applied.length}`);
+for (const line of applied) console.log(`   ${line}`);
+
+// 5. Clean up: give the external_id back, then deactivate the patient.
+await api('PATCH', `/patients/${patient.id}`, { patient: { external_id: null } });
+await api('DELETE', `/patients/${patient.id}`);
+console.log('5. Cleaned up');

@@ -80,3 +80,8 @@ jobs:
         run: |
           [ -n "$ZUBOKLIK_API_URL" ] || unset ZUBOKLIK_API_URL
           bin/run-all webhooks $LANGUAGES
+      - name: Sync in every language
+        if: steps.key.outputs.present == 'true' && !cancelled()
+        run: |
+          [ -n "$ZUBOKLIK_API_URL" ] || unset ZUBOKLIK_API_URL
+          bin/run-all sync $LANGUAGES

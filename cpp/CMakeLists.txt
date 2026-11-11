@@ -14,6 +14,9 @@ target_link_libraries(booking PRIVATE CURL::libcurl nlohmann_json::nlohmann_json
 add_executable(patients patients.cpp)
 target_link_libraries(patients PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
 
+add_executable(sync sync.cpp)
+target_link_libraries(sync PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
+
 add_executable(webhooks webhooks.cpp)
 target_link_libraries(webhooks PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
 

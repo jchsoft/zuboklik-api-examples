@@ -4,7 +4,7 @@ Runnable examples for the [Zuboklik](https://zuboklik.cz) partner API – online
 Every language does **exactly the same thing**, step by step, so you can read the one you know and compare it with any other.
 
 🇨🇿 Hotové ukázky volání Zuboklik API ve dvanácti jazycích. Všechny dělají přesně totéž: objednání pacienta na volný termín,
-práci s kartotékou pacientů, správu webhooků a ověření jejich podpisu. Dokumentace API: <https://zuboklik.cz/api-dokumentace>.
+práci s kartotékou pacientů, správu webhooků, ověření jejich podpisu a obousměrnou synchronizaci s jiným systémem. Dokumentace API: <https://zuboklik.cz/api-dokumentace>.
 
 ## The examples
 
@@ -13,6 +13,7 @@ práci s kartotékou pacientů, správu webhooků a ověření jejich podpisu. D
 | **booking** | find a free slot, book it, handle a taken slot, move the appointment, read it back | `/symptoms`, `/entry_types`, `/entry_states`, `/patients`, `/vacancies`, `/entries` |
 | **patients** | create, page through the list, read, update, deactivate; 404 and 401 answers | `/patients` |
 | **webhooks** | register a webhook, list, a refused URL, switch it off | `/webhooks` |
+| **sync** | keep two systems in step: pair a record with your own id, survive a repeated request, read what changed since last time | `/patients?external_id=`, `/changes` |
 | **verify_webhook** | check the signature of a delivery your endpoint received (offline, no key) | – |
 
 | Language | Directory | Files | Needs |
@@ -71,7 +72,7 @@ Its Bearer key stops working immediately.
 
 ## 2. Run an example
 
-From the language's own directory; replace `booking` with `patients`, `webhooks` or `verify_webhook`:
+From the language's own directory; replace `booking` with `patients`, `webhooks`, `sync` or `verify_webhook`:
 
 ```bash
 cd ruby       && ruby booking.rb
@@ -167,9 +168,49 @@ fetch the details with a `GET` on the resource:
 { "event": "patient_created", "action": "create", "resource_type": "Patient", "resource_id": 4711, "office_code": "ABC123", "occurred_at": "2026-07-16T14:00:00.000+02:00" }
 ```
 
-Answer with a 2xx within 10 seconds. After 10 failed deliveries in a row the webhook is switched off.
+Answer with a 2xx within 10 seconds. After 10 failed deliveries in a row the webhook is switched off; Zuboklik then tries a `webhook_ping`
+delivery every hour for 14 days and switches the webhook back on as soon as your endpoint answers 2xx. Ask `/changes` for what you missed (see `sync`).
 
-## 6. verify_webhook
+## 6. sync
+
+For a system that keeps its own patients and appointments and wants them in step with the practice in both directions, unattended.
+
+| Step | Request | What it shows |
+|---|---|---|
+| 1 | `GET /patients?external_id=…`, `POST /patients` | pairing: store **your own id** as `external_id`; create only when the record is not there yet |
+| 2 | `POST /patients` (again) | a repeated request creates nothing: HTTP 409 `external_id_taken`, and the existing record comes back in the answer |
+| 3 | `GET /patients?external_id=…` | find a record by your own id |
+| 4 | `GET /changes?since=…`, then `?after=<cursor>` | what changed in the practice since last time – created, updated **and deleted** records |
+| 5 | `PATCH /patients/:id`, `DELETE /patients/:id` | clean up (give the `external_id` back, deactivate) |
+
+```text
+1. Patient paired: Eva Ukázková, external_id example-patient-1
+2. Repeated request created nothing: HTTP 409, external_id_taken, same patient: true
+3. Found by external_id: 1 patient(s)
+4. Changes from the practice: 0
+5. Cleaned up
+```
+
+Step 4 reads no changes in a quiet test practice, because changes made with your own key are never sent back to you. Set
+`ZUBOKLIK_SYNC_SINCE` to an earlier time (ISO 8601) to read what the staff, the patients or another connected system did since then:
+
+```text
+4. Changes from the practice: 4
+   patient_created: saved to our system
+   patient_updated: saved to our system
+   patient_created: already gone, removed from our system
+   patient_deleted: removed from our system
+```
+
+How the pieces fit together in a real integration:
+
+1. **First connection.** For each of your patients ask `GET /patients?pin=<birth number>`. Found → `PATCH` it with your `external_id`. Not found → `POST` it with your `external_id`. Load appointments with `GET /entries?from=…&to=…`.
+2. **Your changes → Zuboklik.** `POST` / `PATCH` / `DELETE`, always with `external_id`. If a request times out, send it again – it cannot create a duplicate.
+3. **Zuboklik's changes → you.** A webhook tells you at once; its payload has the same fields as one item of `/changes`, so one function handles both (`apply` in the example).
+4. **The safety net.** Every few minutes, and always after an outage, ask `GET /changes?after=<the last cursor you processed>`. That list is the source of truth; webhooks only make it faster.
+5. **HTTP 410 `changes_expired`** means your cursor is older than 90 days: load everything again (`updated_since` on `/patients` and `/entries` helps).
+
+## 7. verify_webhook
 
 Each delivery is signed with the secret from the registration:
 
@@ -199,6 +240,7 @@ stale timestamp rejected: true
 - **Errors** always look the same: `{"errors": [{"name": "...", "message": ["..."], "attribute": "..."}]}`. Branch on `name` and the HTTP status,
   show `message` to people. `attribute` is present for validation errors.
 - **Ids** are the practice's own numbers. The `id` you get from `/patients` is the one you send as `patient_id` when booking.
+  `external_id` is yours: each connected system sees and sets only its own.
 - **Times** come back with a UTC offset. Send back what `/vacancies` gave you; a time without an offset is read as the practice's local time.
 - **Rate limit**: 600 requests per minute per connected system, then HTTP 429 with a `Retry-After` header. Wait and repeat the request.
 

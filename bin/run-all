@@ -5,15 +5,16 @@
 #   bin/run-all booking               needs ZUBOKLIK_API_KEY (and optionally ZUBOKLIK_API_URL)
 #   bin/run-all patients
 #   bin/run-all webhooks
+#   bin/run-all sync
 #   bin/run-all booking ruby go       only the listed languages
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-example=${1:?usage: bin/run-all verify_webhook|booking|patients|webhooks [language...]}
+example=${1:?usage: bin/run-all verify_webhook|booking|patients|webhooks|sync [language...]}
 shift
 case $example in
-  verify_webhook|booking|patients|webhooks) ;;
+  verify_webhook|booking|patients|webhooks|sync) ;;
   *) echo "unknown example: $example" >&2; exit 2 ;;
 esac
 languages=("$@")
